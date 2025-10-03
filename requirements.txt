@@ -2,7 +2,6 @@ fastapi
 uvicorn[standard]
 pydantic>=2.0
 python-multipart
-google-cloud-vision>=3.7.4
+google-cloud-vision==3.7.4
 openai>=1.35.0
-
 
