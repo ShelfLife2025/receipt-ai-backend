@@ -96,3 +96,5 @@ Output STRICT JSON only. No comments, no code fences, no extra keys.
 """
 
 USER_PROMPT_TEMPLATE = """OCR_TEXT:
+{ocr_text}
+"""
