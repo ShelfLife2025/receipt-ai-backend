@@ -14,3 +14,10 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+from fastapi import File, UploadFile
+from typing import List
+
+@app.post("/parse-receipt")
+async def parse_receipt(files: List[UploadFile] = File(...)):
+    # For now, just return filenames to confirm it's working
+    return {"received_files": [file.filename for file in files]}
