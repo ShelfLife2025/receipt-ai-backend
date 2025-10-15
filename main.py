@@ -145,37 +145,26 @@ def parse_items_with_openai(ocr_text: str) -> ParsedItems:
     return items
 
 # -------------------------
-# Upload endpoints (async file read)
+# Upload helper (async file read)
 # -------------------------
-async def _scan_from_upload(upload: Optional[UploadFile]) -> ParsedItems:
-    if upload is None:
-        raise HTTPException(status_code=400, detail="No file provided.")
-
-    contents = await upload.read()
+async def _scan_from_upload(file: UploadFile) -> ParsedItems:
+    contents = await file.read()
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file was empty.")
-
     ocr_text = ocr_image_bytes(contents)
     return parse_items_with_openai(ocr_text)
 
+# -------------------------
+# Upload endpoints (required 'file' param)
+# -------------------------
 @app.post("/scan", response_model=ParsedItems)
-async def scan(
-    image: Optional[UploadFile] = File(None),
-    file: Optional[UploadFile] = File(None),
-):
-    return await _scan_from_upload(image or file)
+async def scan(file: UploadFile = File(...)):
+    return await _scan_from_upload(file)
 
-# Aliases for safety while the app stabilizes
 @app.post("/api/scan", response_model=ParsedItems)
-async def scan_api(
-    image: Optional[UploadFile] = File(None),
-    file: Optional[UploadFile] = File(None),
-):
-    return await _scan_from_upload(image or file)
+async def scan_api(file: UploadFile = File(...)):
+    return await _scan_from_upload(file)
 
 @app.post("/parse", response_model=ParsedItems)
-async def parse_alias(
-    image: Optional[UploadFile] = File(None),
-    file: Optional[UploadFile] = File(None),
-):
-    return await _scan_from_upload(image or file)
+async def parse_alias(file: UploadFile = File(...)):
+    return await _scan_from_upload(file)
