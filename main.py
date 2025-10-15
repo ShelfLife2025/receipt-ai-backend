@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from google.cloud import vision
 from google.cloud.vision_v1.types.image_annotator import AnnotateImageRequest
 from openai import OpenAI
@@ -54,8 +54,12 @@ def openai_client() -> OpenAI:
     return _openai_client
 
 # -------------------------
-# Health
+# Health / root
 # -------------------------
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -98,3 +102,93 @@ Output STRICT JSON only. No comments, no code fences, no extra keys.
 USER_PROMPT_TEMPLATE = """OCR_TEXT:
 {ocr_text}
 """
+
+# -------------------------
+# Parsing helper (OpenAI)
+# -------------------------
+def parse_items_with_openai(ocr_text: str) -> ParsedItems:
+    client = openai_client()
+
+    # Use Chat Completions for broad compatibility
+    resp = client.chat.completions.create(
+        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": USER_PROMPT_TEMPLATE.format(ocr_text=ocr_text)},
+        ],
+        temperature=0,
+    )
+
+    content = resp.choices[0].message.content if resp.choices else "[]"
+
+    # Extract JSON safely
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        # Try to find the first JSON array in the content
+        start = content.find("[")
+        end = content.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            data = json.loads(content[start : end + 1])
+        else:
+            raise HTTPException(status_code=502, detail="Model did not return valid JSON.")
+
+    # Validate with Pydantic
+    try:
+        items = [ParsedItem(**item) for item in data]
+    except ValidationError as ve:
+        raise HTTPException(status_code=422, detail=f"Parsed JSON validation failed: {ve}")
+
+    # Ensure at least something parsed
+    if not items:
+        raise HTTPException(status_code=204, detail="No items parsed from receipt.")
+    return items
+
+# -------------------------
+# Upload endpoints
+# -------------------------
+def _common_scan_logic(upload: UploadFile) -> ParsedItems:
+    if upload is None:
+        raise HTTPException(status_code=400, detail="No file provided.")
+    if not upload.content_type or "image" not in upload.content_type:
+        # Still accept; some clients omit a proper type
+        pass
+    contents = upload.file.read() if hasattr(upload.file, "read") else None
+    if contents is None or contents == b"":
+        contents = getattr(upload, "spool_max_size", None)  # fallback noop
+        contents = contents or b""
+    if contents == b"":
+        contents = upload.file.read()
+    if contents == b"":
+        raise HTTPException(status_code=400, detail="Uploaded file was empty.")
+
+    # OCR then parse
+    ocr_text = ocr_image_bytes(contents)
+    return parse_items_with_openai(ocr_text)
+
+@app.post("/scan", response_model=ParsedItems)
+async def scan(
+    image: Optional[UploadFile] = File(None),
+    file: Optional[UploadFile] = File(None),
+):
+    """
+    Accepts multipart/form-data with either field name 'image' or 'file'.
+    Returns a JSON array of {name, quantity, category}.
+    """
+    upload = image or file
+    return _common_scan_logic(upload)
+
+# Aliases for safety while the app stabilizes
+@app.post("/api/scan", response_model=ParsedItems)
+async def scan_api(
+    image: Optional[UploadFile] = File(None),
+    file: Optional[UploadFile] = File(None),
+):
+    return _common_scan_logic(image or file)
+
+@app.post("/parse", response_model=ParsedItems)
+async def parse_alias(
+    image: Optional[UploadFile] = File(None),
+    file: Optional[UploadFile] = File(None),
+):
+    return _common_scan_logic(image or file)
