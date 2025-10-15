@@ -157,9 +157,20 @@ async def _scan_from_upload(file: UploadFile) -> ParsedItems:
 # -------------------------
 # Upload endpoints (required 'file' param)
 # -------------------------
+from fastapi import Form
+
 @app.post("/scan", response_model=ParsedItems)
-async def scan(file: UploadFile = File(...)):
-    return await _scan_from_upload(file)
+async def scan(file: UploadFile = File(...), filename: str = Form(None)):
+    """
+    Accepts multipart/form-data upload with field name 'file'.
+    Returns parsed receipt items.
+    """
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file was empty.")
+
+    ocr_text = ocr_image_bytes(contents)
+    return parse_items_with_openai(ocr_text)
 
 @app.post("/api/scan", response_model=ParsedItems)
 async def scan_api(file: UploadFile = File(...)):
