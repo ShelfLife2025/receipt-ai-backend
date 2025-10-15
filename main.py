@@ -145,24 +145,16 @@ def parse_items_with_openai(ocr_text: str) -> ParsedItems:
     return items
 
 # -------------------------
-# Upload endpoints
+# Upload endpoints (async file read)
 # -------------------------
-def _common_scan_logic(upload: UploadFile) -> ParsedItems:
+async def _scan_from_upload(upload: Optional[UploadFile]) -> ParsedItems:
     if upload is None:
         raise HTTPException(status_code=400, detail="No file provided.")
-    if not upload.content_type or "image" not in upload.content_type:
-        # Still accept; some clients omit a proper type
-        pass
-    contents = upload.file.read() if hasattr(upload.file, "read") else None
-    if contents is None or contents == b"":
-        contents = getattr(upload, "spool_max_size", None)  # fallback noop
-        contents = contents or b""
-    if contents == b"":
-        contents = upload.file.read()
-    if contents == b"":
+
+    contents = await upload.read()
+    if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file was empty.")
 
-    # OCR then parse
     ocr_text = ocr_image_bytes(contents)
     return parse_items_with_openai(ocr_text)
 
@@ -171,12 +163,7 @@ async def scan(
     image: Optional[UploadFile] = File(None),
     file: Optional[UploadFile] = File(None),
 ):
-    """
-    Accepts multipart/form-data with either field name 'image' or 'file'.
-    Returns a JSON array of {name, quantity, category}.
-    """
-    upload = image or file
-    return _common_scan_logic(upload)
+    return await _scan_from_upload(image or file)
 
 # Aliases for safety while the app stabilizes
 @app.post("/api/scan", response_model=ParsedItems)
@@ -184,11 +171,11 @@ async def scan_api(
     image: Optional[UploadFile] = File(None),
     file: Optional[UploadFile] = File(None),
 ):
-    return _common_scan_logic(image or file)
+    return await _scan_from_upload(image or file)
 
 @app.post("/parse", response_model=ParsedItems)
 async def parse_alias(
     image: Optional[UploadFile] = File(None),
     file: Optional[UploadFile] = File(None),
 ):
-    return _common_scan_logic(image or file)
+    return await _scan_from_upload(image or file)
